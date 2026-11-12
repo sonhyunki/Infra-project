@@ -18,16 +18,23 @@ function startApp() {
 }
 
 describe('HTTP API & Dashboard Server', () => {
-  it('serves dashboard HTML and blocks path traversal', async () => {
+  it('serves root frontend assets and blocks non-allowlisted files', async () => {
     const app = await startApp();
     try {
-      const htmlRes = await fetch(`${app.baseUrl}/`);
-      assert.equal(htmlRes.status, 200);
-      const html = await htmlRes.text();
-      assert.ok(html.includes('Traffic Pulse'));
+      for (const route of ['/', '/index.html', '/style.css', '/app.js', '/browser-engine.js']) {
+        const res = await fetch(`${app.baseUrl}${route}`);
+        assert.equal(res.status, 200, `Expected 200 for ${route}`);
+      }
 
-      const badRes = await fetch(`${app.baseUrl}/../package.json`);
-      assert.ok(badRes.status === 403 || badRes.status === 404);
+      const htmlRes = await fetch(`${app.baseUrl}/`);
+      const html = await htmlRes.text();
+      assert.ok(html.includes('./style.css'));
+      assert.ok(html.includes('./app.js'));
+
+      for (const blocked of ['/package.json', '/src/server.js', '/../package.json']) {
+        const badRes = await fetch(`${app.baseUrl}${blocked}`);
+        assert.ok(badRes.status === 403 || badRes.status === 404, `Expected blocked for ${blocked}`);
+      }
     } finally {
       await app.close();
     }

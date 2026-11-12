@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Traffic Pulse — 서버 트래픽 테스터</title>
-  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <div class="app">
@@ -17,6 +17,7 @@
         </div>
       </div>
       <div class="status-group">
+        <span id="modeBadge" class="mode-badge">모드 확인 중...</span>
         <span id="elapsedText" class="elapsed">00:00</span>
         <span id="statusBadge" class="badge badge-idle">대기 중</span>
       </div>
@@ -30,7 +31,7 @@
           <div class="section">
             <div class="section-head">
               <label for="targetUrl">대상 서버 URL</label>
-              <button type="button" id="fillEchoBtn" class="link-btn">내장 테스트 서버(/echo) 채우기</button>
+              <button type="button" id="fillEchoBtn" class="link-btn hidden">내장 테스트 서버(/echo) 채우기</button>
             </div>
             <div class="url-row">
               <select id="method" aria-label="HTTP 메서드">
@@ -44,11 +45,14 @@
               <input
                 id="targetUrl"
                 type="url"
-                placeholder="http://localhost:8080/api/test"
+                placeholder="https://your-server.example.com/api/test"
                 value=""
                 required
               />
             </div>
+            <p id="browserModeNote" class="field-hint hidden">
+              GitHub Pages 등 정적 환경에서는 브라우저에서 직접 트래픽을 전송합니다. (CORS 허용 또는 아래 'CORS 무시 모드' 사용)
+            </p>
           </div>
 
           <!-- 2. Speed -->
@@ -153,7 +157,7 @@
 
           <!-- 5. Advanced options -->
           <details class="advanced">
-            <summary>세부 옵션 (헤더 · 타임아웃 · TLS)</summary>
+            <summary>세부 옵션 (헤더 · 타임아웃 · 연결)</summary>
             <div class="advanced-body">
               <div class="field">
                 <label for="headersInput">요청 헤더 (한 줄에 하나씩, <code>Key: Value</code>)</label>
@@ -170,11 +174,15 @@
                 </div>
               </div>
               <div class="checks">
-                <label class="check">
+                <label id="noCorsWrap" class="check hidden">
+                  <input id="noCors" type="checkbox" />
+                  <span>CORS 제한 무시 (no-cors · 상태코드 대신 전송 성공 여부만 측정)</span>
+                </label>
+                <label id="keepAliveWrap" class="check">
                   <input id="keepAlive" type="checkbox" checked />
                   <span>HTTP Keep-Alive 사용</span>
                 </label>
-                <label class="check">
+                <label id="insecureTlsWrap" class="check">
                   <input id="insecureTls" type="checkbox" />
                   <span>자체 서명 HTTPS 인증서 허용</span>
                 </label>
@@ -257,6 +265,6 @@
     </main>
   </div>
 
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

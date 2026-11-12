@@ -1,13 +1,19 @@
+import { BrowserTrafficEngine } from './browser-engine.js';
+
 const state = {
+  executionMode: 'detecting', // 'backend' | 'browser'
   status: 'idle',
   rateMode: 'rps',
   payloadMode: 'generated',
-  history: [], // { rps, latencyMs }
+  history: [],
   liveUpdateTimer: null,
+  browserEngine: null,
 };
 
 const els = {
   form: document.getElementById('testForm'),
+  modeBadge: document.getElementById('modeBadge'),
+  browserModeNote: document.getElementById('browserModeNote'),
   method: document.getElementById('method'),
   targetUrl: document.getElementById('targetUrl'),
   fillEchoBtn: document.getElementById('fillEchoBtn'),
@@ -37,7 +43,11 @@ const els = {
   headersInput: document.getElementById('headersInput'),
   timeoutMs: document.getElementById('timeoutMs'),
   maxConcurrency: document.getElementById('maxConcurrency'),
+  noCorsWrap: document.getElementById('noCorsWrap'),
+  noCors: document.getElementById('noCors'),
+  keepAliveWrap: document.getElementById('keepAliveWrap'),
   keepAlive: document.getElementById('keepAlive'),
+  insecureTlsWrap: document.getElementById('insecureTlsWrap'),
   insecureTls: document.getElementById('insecureTls'),
 
   liveSpeedHint: document.getElementById('liveSpeedHint'),
@@ -138,6 +148,7 @@ function buildConfigFromForm() {
     totalRequests: stopCond === 'count' ? stopNum : 1000,
     totalBytesLimit: stopCond === 'bytes' ? stopNum * 1024 * 1024 : 10 * 1024 * 1024,
     timeoutMs: Number(els.timeoutMs.value) || 10000,
+    noCors: els.noCors.checked,
     keepAlive: els.keepAlive.checked,
     insecureTls: els.insecureTls.checked,
   };
@@ -196,20 +207,27 @@ function scheduleLiveUpdate() {
   clearTimeout(state.liveUpdateTimer);
   state.liveUpdateTimer = setTimeout(async () => {
     if (state.status !== 'running') return;
+    const cfg = buildConfigFromForm();
+    const patch = {
+      rateMode: cfg.rateMode,
+      targetRps: cfg.targetRps,
+      concurrency: cfg.concurrency,
+      targetMbps: cfg.targetMbps,
+      payloadMode: cfg.payloadMode,
+      payloadSizeBytes: cfg.payloadSizeBytes,
+      customBody: cfg.customBody,
+    };
+
+    if (state.executionMode === 'browser') {
+      state.browserEngine.updateConfig(patch);
+      return;
+    }
+
     try {
-      const cfg = buildConfigFromForm();
-      const res = await fetch('/api/test/config', {
+      const res = await fetch('./api/test/config', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rateMode: cfg.rateMode,
-          targetRps: cfg.targetRps,
-          concurrency: cfg.concurrency,
-          targetMbps: cfg.targetMbps,
-          payloadMode: cfg.payloadMode,
-          payloadSizeBytes: cfg.payloadSizeBytes,
-          customBody: cfg.customBody,
-        }),
+        body: JSON.stringify(patch),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -218,7 +236,7 @@ function scheduleLiveUpdate() {
         showError('');
       }
     } catch {
-      // Ignore transient network errors during rapid dragging
+      // Ignore transient errors while dragging
     }
   }, 100);
 }
@@ -233,6 +251,7 @@ function setRunningUI(isRunning) {
     els.headersInput,
     els.timeoutMs,
     els.maxConcurrency,
+    els.noCors,
     els.keepAlive,
     els.insecureTls,
   ];
@@ -288,7 +307,6 @@ function renderSnapshot(snap) {
   els.kpiLatency.innerHTML = `${m.latency.avgMs.toFixed(1)} <small>ms</small>`;
   els.kpiPercentiles.textContent = `P95 ${m.latency.p95Ms.toFixed(1)}ms · P99 ${m.latency.p99Ms.toFixed(1)}ms`;
 
-  // Status buckets
   const b = m.statusBuckets;
   els.statusBuckets.innerHTML = '';
   for (const [key, clsName] of [
@@ -307,7 +325,6 @@ function renderSnapshot(snap) {
   els.statusCodesList.textContent =
     codeEntries.length > 0 ? codeEntries.map(([code, cnt]) => `${code}: ${cnt.toLocaleString()}건`).join('  ·  ') : '';
 
-  // Errors
   els.errorList.innerHTML = '';
   if (!m.recentErrors || m.recentErrors.length === 0) {
     const li = document.createElement('li');
@@ -325,9 +342,7 @@ function renderSnapshot(snap) {
 
   if (isRunning || (prevStatus === 'running' && snap.status !== 'running')) {
     state.history.push({ rps: m.currentRps, latencyMs: m.latency.avgMs });
-    if (state.history.length > 240) {
-      state.history.shift();
-    }
+    if (state.history.length > 240) state.history.shift();
     drawChart();
   }
 }
@@ -351,7 +366,6 @@ function drawChart() {
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
 
-  // Grid lines
   ctx.strokeStyle = '#e2e8f0';
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -374,7 +388,6 @@ function drawChart() {
   const maxRps = Math.max(10, ...pts.map((p) => p.rps)) * 1.15;
   const maxLat = Math.max(10, ...pts.map((p) => p.latencyMs)) * 1.15;
 
-  // Axis labels
   ctx.fillStyle = '#64748b';
   ctx.font = '11px sans-serif';
   ctx.textAlign = 'right';
@@ -407,9 +420,12 @@ async function startOrStop(e) {
   showError('');
 
   if (state.status === 'running') {
-    const res = await fetch('/api/test/stop', { method: 'POST' });
-    const data = await res.json();
-    renderSnapshot(data);
+    if (state.executionMode === 'browser') {
+      renderSnapshot(state.browserEngine.stop());
+      return;
+    }
+    const res = await fetch('./api/test/stop', { method: 'POST' });
+    renderSnapshot(await res.json());
     return;
   }
 
@@ -423,8 +439,17 @@ async function startOrStop(e) {
   state.history = [];
   drawChart();
 
+  if (state.executionMode === 'browser') {
+    try {
+      renderSnapshot(state.browserEngine.start(cfg));
+    } catch (err) {
+      showError(err?.message || '테스트를 시작할 수 없습니다.');
+    }
+    return;
+  }
+
   try {
-    const res = await fetch('/api/test/start', {
+    const res = await fetch('./api/test/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cfg),
@@ -440,16 +465,57 @@ async function startOrStop(e) {
   }
 }
 
-function connectSSE() {
-  const es = new EventSource('/api/events');
+function enableBackendMode(initialSnap) {
+  state.executionMode = 'backend';
+  els.modeBadge.textContent = '로컬 엔진 모드';
+  els.fillEchoBtn.classList.remove('hidden');
+  els.browserModeNote.classList.add('hidden');
+  els.noCorsWrap.classList.add('hidden');
+  els.keepAliveWrap.classList.remove('hidden');
+  els.insecureTlsWrap.classList.remove('hidden');
+
+  if (initialSnap) renderSnapshot(initialSnap);
+
+  const es = new EventSource('./api/events');
   es.addEventListener('metrics', (ev) => {
     try {
-      const snap = JSON.parse(ev.data);
-      renderSnapshot(snap);
+      renderSnapshot(JSON.parse(ev.data));
     } catch {
       // ignore malformed packet
     }
   });
+}
+
+function enableBrowserMode() {
+  state.executionMode = 'browser';
+  state.browserEngine = new BrowserTrafficEngine(renderSnapshot);
+  els.modeBadge.textContent = '브라우저 직접 모드';
+  els.fillEchoBtn.classList.add('hidden');
+  els.browserModeNote.classList.remove('hidden');
+  els.noCorsWrap.classList.remove('hidden');
+  els.keepAliveWrap.classList.add('hidden');
+  els.insecureTlsWrap.classList.add('hidden');
+}
+
+async function detectMode() {
+  if (window.location.protocol === 'file:') {
+    enableBrowserMode();
+    return;
+  }
+  try {
+    const res = await fetch('./api/status', { cache: 'no-store' });
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
+      const snap = await res.json();
+      if (snap && typeof snap.status === 'string') {
+        enableBackendMode(snap);
+        return;
+      }
+    }
+  } catch {
+    // Fallback to static browser mode
+  }
+  enableBrowserMode();
 }
 
 function init() {
@@ -502,7 +568,7 @@ function init() {
   updateStopConditionUI();
   updateGetBodyNotice();
   drawChart();
-  connectSSE();
+  detectMode();
 }
 
 init();

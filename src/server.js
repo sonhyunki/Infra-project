@@ -5,7 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TrafficEngine } from './load-engine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
+const ROOT_DIR = path.resolve(__dirname, '..');
+const ALLOWED_STATIC_FILES = new Set(['index.html', 'style.css', 'app.js', 'browser-engine.js']);
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -69,8 +70,13 @@ async function handleEcho(req, res, urlObj) {
 
 async function serveStatic(res, pathname) {
   const relPath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
-  const resolved = path.resolve(PUBLIC_DIR, relPath);
-  if (resolved !== PUBLIC_DIR && !resolved.startsWith(PUBLIC_DIR + path.sep)) {
+  if (!ALLOWED_STATIC_FILES.has(relPath)) {
+    sendJson(res, 404, { error: '페이지를 찾을 수 없습니다.' });
+    return;
+  }
+
+  const resolved = path.resolve(ROOT_DIR, relPath);
+  if (!resolved.startsWith(ROOT_DIR + path.sep)) {
     sendJson(res, 403, { error: '접근이 거부되었습니다.' });
     return;
   }
