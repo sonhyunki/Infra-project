@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Traffic Pulse — 서버 트래픽 테스터</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">TP</div>
+        <div>
+          <h1>Traffic Pulse</h1>
+          <p class="subtitle">전송량과 전송 속도를 자유롭게 조절하는 서버 부하 테스트</p>
+        </div>
+      </div>
+      <div class="status-group">
+        <span id="elapsedText" class="elapsed">00:00</span>
+        <span id="statusBadge" class="badge badge-idle">대기 중</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- Left: Control Panel -->
+      <section class="card controls-card">
+        <form id="testForm" novalidate>
+          <!-- 1. Target -->
+          <div class="section">
+            <div class="section-head">
+              <label for="targetUrl">대상 서버 URL</label>
+              <button type="button" id="fillEchoBtn" class="link-btn">내장 테스트 서버(/echo) 채우기</button>
+            </div>
+            <div class="url-row">
+              <select id="method" aria-label="HTTP 메서드">
+                <option value="GET">GET</option>
+                <option value="POST" selected>POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+                <option value="HEAD">HEAD</option>
+              </select>
+              <input
+                id="targetUrl"
+                type="url"
+                placeholder="http://localhost:8080/api/test"
+                value=""
+                required
+              />
+            </div>
+          </div>
+
+          <!-- 2. Speed -->
+          <div class="section">
+            <div class="section-head">
+              <span>전송 속도</span>
+              <span id="liveSpeedHint" class="live-hint hidden">실시간 조절 가능</span>
+            </div>
+            <div class="segmented" role="tablist" aria-label="전송 속도 기준">
+              <button type="button" class="seg-btn active" data-rate-mode="rps">초당 요청 (RPS)</button>
+              <button type="button" class="seg-btn" data-rate-mode="concurrency">동시 접속 수</button>
+              <button type="button" class="seg-btn" data-rate-mode="bandwidth">대역폭 (Mbps)</button>
+            </div>
+
+            <div class="slider-box" data-rate-panel="rps">
+              <div class="slider-row">
+                <input id="rpsRange" type="range" min="1" max="1000" step="1" value="20" />
+                <div class="num-unit">
+                  <input id="targetRps" type="number" min="0.1" max="20000" step="1" value="20" />
+                  <span>req/s</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="slider-box hidden" data-rate-panel="concurrency">
+              <div class="slider-row">
+                <input id="concurrencyRange" type="range" min="1" max="300" step="1" value="10" />
+                <div class="num-unit">
+                  <input id="concurrency" type="number" min="1" max="2000" step="1" value="10" />
+                  <span>연결</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="slider-box hidden" data-rate-panel="bandwidth">
+              <div class="slider-row">
+                <input id="mbpsRange" type="range" min="0.1" max="200" step="0.1" value="5" />
+                <div class="num-unit">
+                  <input id="targetMbps" type="number" min="0.01" max="2000" step="0.1" value="5" />
+                  <span>Mbps</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. Volume & Payload -->
+          <div class="section">
+            <div class="section-head">
+              <span>요청당 전송량 (페이로드)</span>
+              <span id="livePayloadHint" class="live-hint hidden">실시간 조절 가능</span>
+            </div>
+            <div class="segmented" role="tablist" aria-label="페이로드 유형">
+              <button type="button" class="seg-btn" data-payload-mode="none">없음 (0 B)</button>
+              <button type="button" class="seg-btn active" data-payload-mode="generated">크기 지정</button>
+              <button type="button" class="seg-btn" data-payload-mode="custom">직접 입력</button>
+            </div>
+
+            <div class="slider-box" data-payload-panel="generated">
+              <div class="slider-row">
+                <input id="payloadRange" type="range" min="0" max="1024" step="1" value="1" />
+                <div class="num-unit">
+                  <input id="payloadSizeValue" type="number" min="0" max="51200" step="1" value="1" />
+                  <select id="payloadSizeUnit" aria-label="전송량 단위">
+                    <option value="B">B</option>
+                    <option value="KB" selected>KB</option>
+                    <option value="MB">MB</option>
+                  </select>
+                </div>
+              </div>
+              <p id="getBodyNotice" class="field-note hidden">
+                GET/HEAD 메서드는 요청 바디를 보내지 않습니다. 전송량을 실어 보내려면 POST/PUT을 선택하세요.
+              </p>
+            </div>
+
+            <div class="slider-box hidden" data-payload-panel="custom">
+              <textarea
+                id="customBody"
+                rows="3"
+                placeholder='{"message": "hello server"}'
+              ></textarea>
+            </div>
+          </div>
+
+          <!-- 4. Stop condition -->
+          <div class="section">
+            <div class="section-head">
+              <span>종료 조건</span>
+            </div>
+            <div class="stop-row">
+              <select id="stopCondition" aria-label="종료 조건">
+                <option value="duration" selected>지속 시간</option>
+                <option value="count">총 요청 수</option>
+                <option value="bytes">총 전송량</option>
+                <option value="manual">수동 중지까지 계속</option>
+              </select>
+              <div id="stopValueWrap" class="num-unit">
+                <input id="stopValue" type="number" min="1" step="1" value="30" />
+                <span id="stopUnit">초</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. Advanced options -->
+          <details class="advanced">
+            <summary>세부 옵션 (헤더 · 타임아웃 · TLS)</summary>
+            <div class="advanced-body">
+              <div class="field">
+                <label for="headersInput">요청 헤더 (한 줄에 하나씩, <code>Key: Value</code>)</label>
+                <textarea id="headersInput" rows="3" placeholder="Content-Type: application/json&#10;Authorization: Bearer token"></textarea>
+              </div>
+              <div class="grid-2">
+                <div class="field">
+                  <label for="timeoutMs">요청 타임아웃 (ms)</label>
+                  <input id="timeoutMs" type="number" min="100" max="120000" value="10000" />
+                </div>
+                <div class="field">
+                  <label for="maxConcurrency">최대 동시 연결 제한</label>
+                  <input id="maxConcurrency" type="number" min="1" max="2000" value="200" />
+                </div>
+              </div>
+              <div class="checks">
+                <label class="check">
+                  <input id="keepAlive" type="checkbox" checked />
+                  <span>HTTP Keep-Alive 사용</span>
+                </label>
+                <label class="check">
+                  <input id="insecureTls" type="checkbox" />
+                  <span>자체 서명 HTTPS 인증서 허용</span>
+                </label>
+              </div>
+            </div>
+          </details>
+
+          <div id="errorBox" class="error-box hidden" role="alert"></div>
+
+          <div class="actions">
+            <button type="submit" id="toggleBtn" class="btn btn-primary">트래픽 전송 시작</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Right: Live Monitor -->
+      <section class="monitor-col">
+        <div id="progressWrap" class="progress-wrap hidden">
+          <div class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+          <span id="progressLabel" class="progress-label">0%</span>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="card kpi">
+            <span class="kpi-label">현재 전송 속도</span>
+            <strong id="kpiRps" class="kpi-value">0.0 <small>RPS</small></strong>
+            <span id="kpiActive" class="kpi-sub">활성 연결 0개</span>
+          </div>
+          <div class="card kpi">
+            <span class="kpi-label">전송 대역폭</span>
+            <strong id="kpiMbps" class="kpi-value">0.00 <small>Mbps</small></strong>
+            <span id="kpiBps" class="kpi-sub">송신 0 B/s · 수신 0 B/s</span>
+          </div>
+          <div class="card kpi">
+            <span class="kpi-label">성공 / 전체 요청</span>
+            <strong id="kpiCount" class="kpi-value">0 / 0</strong>
+            <span id="kpiSentBytes" class="kpi-sub">실패 0건 · 누적 송신 0 B</span>
+          </div>
+          <div class="card kpi">
+            <span class="kpi-label">응답 지연시간</span>
+            <strong id="kpiLatency" class="kpi-value">0.0 <small>ms</small></strong>
+            <span id="kpiPercentiles" class="kpi-sub">P95 0.0ms · P99 0.0ms</span>
+          </div>
+        </div>
+
+        <div class="card chart-card">
+          <div class="chart-head">
+            <h2>실시간 추이 (최근 60초)</h2>
+            <div class="legend">
+              <span><i class="dot dot-rps"></i>RPS</span>
+              <span><i class="dot dot-lat"></i>평균 지연(ms)</span>
+            </div>
+          </div>
+          <canvas id="metricsChart" height="220"></canvas>
+        </div>
+
+        <div class="card details-card">
+          <div class="split-row">
+            <div>
+              <h3>응답 상태 코드</h3>
+              <div id="statusBuckets" class="buckets">
+                <span class="pill pill-2xx">2xx: 0</span>
+                <span class="pill pill-3xx">3xx: 0</span>
+                <span class="pill pill-4xx">4xx: 0</span>
+                <span class="pill pill-5xx">5xx: 0</span>
+              </div>
+              <div id="statusCodesList" class="codes-list"></div>
+            </div>
+            <div>
+              <h3>최근 오류</h3>
+              <ul id="errorList" class="error-list">
+                <li class="empty">발생한 오류가 없습니다.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "traffic-tester",
+  "version": "1.0.0",
+  "description": "Simple local web dashboard to generate configurable HTTP/HTTPS traffic for testing your own servers.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": ["load-test", "http", "traffic-generator", "benchmark"],
+  "license": "MIT"
+}
