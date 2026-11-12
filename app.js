@@ -127,12 +127,26 @@ function getPayloadSizeBytes() {
   return Math.round(val * mult);
 }
 
+function normalizeInputUrl(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.includes('://')) return trimmed;
+  const hostPart = trimmed.split('/')[0].split(':')[0].toLowerCase();
+  const isLocal = hostPart === 'localhost' || hostPart === '127.0.0.1' || hostPart === '[::1]';
+  const defaultScheme = window.location.protocol === 'https:' && !isLocal ? 'https://' : 'http://';
+  return `${defaultScheme}${trimmed}`;
+}
+
 function buildConfigFromForm() {
   const stopCond = els.stopCondition.value;
   const stopNum = Math.max(1, Number(els.stopValue.value) || 1);
+  const targetUrl = normalizeInputUrl(els.targetUrl.value);
+  if (targetUrl && targetUrl !== els.targetUrl.value.trim()) {
+    els.targetUrl.value = targetUrl;
+  }
 
   return {
-    targetUrl: els.targetUrl.value.trim(),
+    targetUrl,
     method: els.method.value,
     headers: parseHeadersText(els.headersInput.value),
     rateMode: state.rateMode,
@@ -424,8 +438,12 @@ async function startOrStop(e) {
       renderSnapshot(state.browserEngine.stop());
       return;
     }
-    const res = await fetch('./api/test/stop', { method: 'POST' });
-    renderSnapshot(await res.json());
+    try {
+      const res = await fetch('./api/test/stop', { method: 'POST' });
+      renderSnapshot(await res.json());
+    } catch (err) {
+      showError(err?.message || '중지 요청에 실패했습니다.');
+    }
     return;
   }
 

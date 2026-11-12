@@ -1,4 +1,5 @@
 const BODY_LESS_METHODS = new Set(['GET', 'HEAD']);
+const NO_CORS_METHODS = new Set(['GET', 'HEAD', 'POST']);
 const LATENCY_WINDOW_SIZE = 2000;
 const RECENT_ERRORS_LIMIT = 15;
 const TICK_INTERVAL_MS = 250;
@@ -88,11 +89,18 @@ export class BrowserTrafficEngine {
     if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
       throw new Error('http:// 또는 https:// 프로토콜만 지원합니다.');
     }
-    if (window.location.protocol === 'https:' && parsedUrl.protocol === 'http:' && parsedUrl.hostname !== 'localhost' && parsedUrl.hostname !== '127.0.0.1') {
+    const pageProtocol = typeof window !== 'undefined' ? window.location.protocol : '';
+    const isLocalHost = parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1' || parsedUrl.hostname === '[::1]';
+    if (pageProtocol === 'https:' && parsedUrl.protocol === 'http:' && !isLocalHost) {
       throw new Error('HTTPS 페이지(GitHub Pages)에서는 보안상 HTTP 대상에 요청할 수 없습니다. HTTPS URL을 사용하거나 로컬 서버를 실행해주세요.');
     }
 
-    this.config = { ...rawConfig, targetUrl: parsedUrl.toString() };
+    const method = String(rawConfig.method ?? 'GET').toUpperCase();
+    if (rawConfig.noCors && !NO_CORS_METHODS.has(method)) {
+      throw new Error('CORS 제한 무시(no-cors) 모드에서는 GET, HEAD, POST 메서드만 사용할 수 있습니다.');
+    }
+
+    this.config = { ...rawConfig, method, targetUrl: parsedUrl.toString() };
     this.rebuildPayload();
     this.resetStats();
 
@@ -276,9 +284,11 @@ export class BrowserTrafficEngine {
     if (err || statusCode === 0) {
       this.errorCount++;
       this.tickErrors++;
-      const msg = err?.message || 'CORS 차단 또는 네트워크 연결 오류';
-      this.recentErrors.unshift({ time: new Date().toISOString(), message: msg });
-      if (this.recentErrors.length > RECENT_ERRORS_LIMIT) this.recentErrors.length = RECENT_ERRORS_LIMIT;
+      let msg = err?.message || 'CORS 차단 또는 네트워크 연결 오류';
+      if (err?.name === 'TypeError' && !this.config?.noCors) {
+        msg = '네트워크 오류 또는 CORS 차단 (세부 옵션에서 "CORS 제한 무시"를 켜보세요)';
+      }
+      this.pushError(msg);
       return;
     }
 
@@ -302,11 +312,18 @@ export class BrowserTrafficEngine {
       this.statusBuckets['4xx']++;
       this.errorCount++;
       this.tickErrors++;
+      this.pushError(`HTTP ${statusCode}`);
     } else if (statusCode >= 500) {
       this.statusBuckets['5xx']++;
       this.errorCount++;
       this.tickErrors++;
+      this.pushError(`HTTP ${statusCode}`);
     }
+  }
+
+  pushError(message) {
+    this.recentErrors.unshift({ time: new Date().toISOString(), message });
+    if (this.recentErrors.length > RECENT_ERRORS_LIMIT) this.recentErrors.length = RECENT_ERRORS_LIMIT;
   }
 
   finish(finalStatus) {
